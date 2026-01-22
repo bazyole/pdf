@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Split PDF (client-side)</title>
+  <title>Split & Merge PDF (client-side)</title>
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     body { margin: 0; background:#0b0f19; color:#e7eefc; }
@@ -61,7 +61,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Outil HTML — Split PDF (découper un PDF)</h1>
+    <h1>Outil HTML — PDF (découper & fusionner)</h1>
 
     <div class="card">
       <label>1) Choisir un PDF</label>
@@ -112,6 +112,27 @@
         Libs utilisées côté navigateur : <a href="https://pdf-lib.js.org/" target="_blank" rel="noreferrer">pdf-lib</a> + <a href="https://stuk.github.io/jszip/" target="_blank" rel="noreferrer">JSZip</a>.
       </div>
     </div>
+
+    <div class="card" style="margin-top:16px;">
+      <label>Fusionner plusieurs PDFs</label>
+      <input id="mergeFiles" type="file" accept="application/pdf" multiple />
+
+      <div class="row">
+        <div class="col">
+          <label>Nom du fichier fusionné</label>
+          <input id="mergeName" type="text" placeholder="Ex: dossier-fusionne" />
+          <div class="hint">Le fichier final sera nommé <code>nom_fusion.pdf</code>.</div>
+        </div>
+        <div class="col">
+          <label>Sortie</label>
+          <div class="hint">Le PDF fusionné est téléchargé automatiquement.</div>
+        </div>
+      </div>
+
+      <button id="btnMerge" disabled>Fusionner & Télécharger</button>
+
+      <pre id="mergeLog" aria-live="polite"></pre>
+    </div>
   </div>
 
   <!-- pdf-lib -->
@@ -128,6 +149,10 @@
     const baseNameEl = $("baseName");
     const btnSplitEl = $("btnSplit");
     const logEl = $("log");
+    const mergeFilesEl = $("mergeFiles");
+    const mergeNameEl = $("mergeName");
+    const btnMergeEl = $("btnMerge");
+    const mergeLogEl = $("mergeLog");
 
     let pdfBytes = null;
     let pdfName = "document";
@@ -139,6 +164,14 @@
     }
 
     function clearLog() { logEl.textContent = ""; }
+
+    function logMerge(msg, cls="") {
+      const prefix = cls ? `[${cls.toUpperCase()}] ` : "";
+      mergeLogEl.textContent += prefix + msg + "\n";
+      mergeLogEl.scrollTop = mergeLogEl.scrollHeight;
+    }
+
+    function clearMergeLog() { mergeLogEl.textContent = ""; }
 
     function sanitizeBaseName(name) {
       const s = (name || "").trim();
@@ -234,6 +267,26 @@
       }
     });
 
+    mergeFilesEl.addEventListener("change", async () => {
+      clearMergeLog();
+      const files = Array.from(mergeFilesEl.files || []);
+      if (files.length === 0) {
+        btnMergeEl.disabled = true;
+        return;
+      }
+      const invalid = files.find((file) => file.type !== "application/pdf");
+      if (invalid) {
+        logMerge(`Le fichier "${invalid.name}" n'est pas un PDF.`, "err");
+        btnMergeEl.disabled = true;
+        return;
+      }
+      if (!mergeNameEl.value.trim()) {
+        mergeNameEl.value = "documents";
+      }
+      logMerge(`${files.length} PDF(s) prêt(s) à fusionner.`, "ok");
+      btnMergeEl.disabled = false;
+    });
+
     btnSplitEl.addEventListener("click", async () => {
       clearLog();
       btnSplitEl.disabled = true;
@@ -287,6 +340,35 @@
         log(String(e?.message || e), "err");
       } finally {
         btnSplitEl.disabled = false;
+      }
+    });
+
+    btnMergeEl.addEventListener("click", async () => {
+      clearMergeLog();
+      btnMergeEl.disabled = true;
+
+      try {
+        const files = Array.from(mergeFilesEl.files || []);
+        if (files.length === 0) throw new Error("Aucun PDF sélectionné.");
+
+        const out = await PDFLib.PDFDocument.create();
+        for (const file of files) {
+          const bytes = await readFileAsArrayBuffer(file);
+          const src = await PDFLib.PDFDocument.load(bytes);
+          const pages = await out.copyPages(src, src.getPageIndices());
+          pages.forEach((page) => out.addPage(page));
+          logMerge(`Ajouté: ${file.name} (${pages.length} page(s)).`, "ok");
+        }
+
+        const mergedBytes = await out.save();
+        const base = sanitizeBaseName(mergeNameEl.value || "documents");
+        const mergedName = `${base}_fusion.pdf`;
+        downloadBlob(new Blob([mergedBytes], { type: "application/pdf" }), mergedName);
+        logMerge(`Téléchargement lancé: ${mergedName}`, "ok");
+      } catch (e) {
+        logMerge(String(e?.message || e), "err");
+      } finally {
+        btnMergeEl.disabled = false;
       }
     });
   </script>
