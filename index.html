@@ -4,66 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Split & Merge PDF (client-side)</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    body { margin: 0; background:#0b0f19; color:#e7eefc; }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
-    h1 { font-size: 22px; margin: 0 0 14px; }
-    .card {
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.10);
-      border-radius: 14px;
-      padding: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.35);
-    }
-    label { display:block; font-weight:600; margin: 12px 0 8px; }
-    input[type="file"] { width:100%; }
-    input[type="text"], input[type="number"] {
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,.18);
-      background: rgba(0,0,0,.25);
-      color:#e7eefc;
-      outline:none;
-    }
-    .row { display:flex; gap: 12px; flex-wrap: wrap; }
-    .col { flex:1 1 280px; }
-    button {
-      margin-top: 14px;
-      padding: 10px 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,.18);
-      background: rgba(122,162,247,.22);
-      color:#e7eefc;
-      font-weight:700;
-      cursor:pointer;
-    }
-    button:disabled { opacity:.55; cursor:not-allowed; }
-    .hint { opacity:.85; font-size: 13px; line-height: 1.35; }
-    .ok { color: #6ee7b7; }
-    .warn { color: #fbbf24; }
-    .err { color: #fb7185; }
-    pre {
-      margin: 12px 0 0;
-      padding: 12px;
-      border-radius: 12px;
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.10);
-      overflow:auto;
-      font-size: 12px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-    }
-    .footer { margin-top: 14px; opacity:.75; font-size: 12px; }
-    a { color:#a5b4fc; }
-  </style>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="wrap">
     <h1>Outil HTML — PDF (découper & fusionner)</h1>
 
-    <div class="card">
+    <div class="tool-switch" role="tablist" aria-label="Choisir un outil PDF">
+      <button id="btnShowSplit" type="button" aria-pressed="true" data-tool="split">Découper un PDF</button>
+      <button id="btnShowMerge" type="button" aria-pressed="false" data-tool="merge">Fusionner des PDFs</button>
+    </div>
+
+    <div class="card tool-panel" id="splitPanel">
       <label>1) Choisir un PDF</label>
       <input id="pdfFile" type="file" accept="application/pdf" />
 
@@ -113,7 +65,7 @@
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px;">
+    <div class="card tool-panel is-hidden" id="mergePanel">
       <label>Fusionner plusieurs PDFs</label>
       <input id="mergeFiles" type="file" accept="application/pdf" multiple />
 
@@ -153,6 +105,9 @@
     const mergeNameEl = $("mergeName");
     const btnMergeEl = $("btnMerge");
     const mergeLogEl = $("mergeLog");
+    const splitPanelEl = $("splitPanel");
+    const mergePanelEl = $("mergePanel");
+    const toolButtons = Array.from(document.querySelectorAll("[data-tool]"));
 
     let pdfBytes = null;
     let pdfName = "document";
@@ -172,6 +127,19 @@
     }
 
     function clearMergeLog() { mergeLogEl.textContent = ""; }
+
+    function showTool(name) {
+      const isSplit = name === "split";
+      splitPanelEl.classList.toggle("is-hidden", !isSplit);
+      mergePanelEl.classList.toggle("is-hidden", isSplit);
+      toolButtons.forEach((btn) => {
+        btn.setAttribute("aria-pressed", String(btn.dataset.tool === name));
+      });
+    }
+
+    toolButtons.forEach((btn) => {
+      btn.addEventListener("click", () => showTool(btn.dataset.tool));
+    });
 
     function sanitizeBaseName(name) {
       const s = (name || "").trim();
