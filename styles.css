@@ -20,6 +20,7 @@ input[type="text"], input[type="number"] {
   color:#e7eefc;
   outline:none;
 }
+input[type="range"] { width: 100%; }
 .row { display:flex; gap: 12px; flex-wrap: wrap; }
 .col { flex:1 1 280px; }
 button {

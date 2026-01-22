@@ -13,6 +13,7 @@
     <div class="tool-switch" role="tablist" aria-label="Choisir un outil PDF">
       <button id="btnShowSplit" type="button" aria-pressed="true" data-tool="split">Découper un PDF</button>
       <button id="btnShowMerge" type="button" aria-pressed="false" data-tool="merge">Fusionner des PDFs</button>
+      <button id="btnShowCompress" type="button" aria-pressed="false" data-tool="compress">Réduire le poids d’un PDF</button>
     </div>
 
     <div class="card tool-panel" id="splitPanel">
@@ -72,8 +73,8 @@
       <div class="row">
         <div class="col">
           <label>Nom du fichier fusionné</label>
-          <input id="mergeName" type="text" placeholder="Ex: dossier-fusionne" />
-          <div class="hint">Le fichier final sera nommé <code>nom_fusion.pdf</code>.</div>
+          <input id="mergeName" type="text" placeholder="Ex: dossier-final" />
+          <div class="hint">Le fichier final portera exactement ce nom (extension .pdf ajoutée si besoin).</div>
         </div>
         <div class="col">
           <label>Sortie</label>
@@ -85,10 +86,39 @@
 
       <pre id="mergeLog" aria-live="polite"></pre>
     </div>
+
+    <div class="card tool-panel is-hidden" id="compressPanel">
+      <label>Réduire le poids d’un PDF (rasterisation)</label>
+      <input id="compressFile" type="file" accept="application/pdf" />
+
+      <div class="row">
+        <div class="col">
+          <label>Nom du fichier compressé</label>
+          <input id="compressName" type="text" placeholder="Ex: dossier-leger" />
+          <div class="hint">Le fichier final portera exactement ce nom (extension .pdf ajoutée si besoin).</div>
+        </div>
+        <div class="col">
+          <label>Échelle de rendu</label>
+          <input id="compressScale" type="range" min="0.4" max="1" step="0.05" value="0.8" />
+          <div class="hint">Plus l’échelle est basse, plus le fichier sera léger (ex: <span id="compressScaleValue">0.80</span>).</div>
+        </div>
+        <div class="col">
+          <label>Qualité JPEG</label>
+          <input id="compressQuality" type="range" min="0.4" max="0.95" step="0.05" value="0.7" />
+          <div class="hint">Impacte la clarté des pages (ex: <span id="compressQualityValue">0.70</span>).</div>
+        </div>
+      </div>
+
+      <button id="btnCompress" disabled>Réduire & Télécharger</button>
+
+      <pre id="compressLog" aria-live="polite"></pre>
+    </div>
   </div>
 
   <!-- pdf-lib -->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <!-- pdfjs -->
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <!-- jszip -->
   <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 
@@ -107,7 +137,16 @@
     const mergeLogEl = $("mergeLog");
     const splitPanelEl = $("splitPanel");
     const mergePanelEl = $("mergePanel");
+    const compressPanelEl = $("compressPanel");
     const toolButtons = Array.from(document.querySelectorAll("[data-tool]"));
+    const compressFileEl = $("compressFile");
+    const compressNameEl = $("compressName");
+    const compressScaleEl = $("compressScale");
+    const compressScaleValueEl = $("compressScaleValue");
+    const compressQualityEl = $("compressQuality");
+    const compressQualityValueEl = $("compressQualityValue");
+    const btnCompressEl = $("btnCompress");
+    const compressLogEl = $("compressLog");
 
     let pdfBytes = null;
     let pdfName = "document";
@@ -128,10 +167,21 @@
 
     function clearMergeLog() { mergeLogEl.textContent = ""; }
 
+    function logCompress(msg, cls="") {
+      const prefix = cls ? `[${cls.toUpperCase()}] ` : "";
+      compressLogEl.textContent += prefix + msg + "\n";
+      compressLogEl.scrollTop = compressLogEl.scrollHeight;
+    }
+
+    function clearCompressLog() { compressLogEl.textContent = ""; }
+
     function showTool(name) {
       const isSplit = name === "split";
+      const isMerge = name === "merge";
+      const isCompress = name === "compress";
       splitPanelEl.classList.toggle("is-hidden", !isSplit);
-      mergePanelEl.classList.toggle("is-hidden", isSplit);
+      mergePanelEl.classList.toggle("is-hidden", !isMerge);
+      compressPanelEl.classList.toggle("is-hidden", !isCompress);
       toolButtons.forEach((btn) => {
         btn.setAttribute("aria-pressed", String(btn.dataset.tool === name));
       });
@@ -144,7 +194,13 @@
     function sanitizeBaseName(name) {
       const s = (name || "").trim();
       if (!s) return "document";
-      return s.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").slice(0, 80);
+      const cleaned = s.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").slice(0, 80);
+      return cleaned.replace(/\.pdf$/i, "");
+    }
+
+    function buildPdfName(name, fallback) {
+      const base = sanitizeBaseName(name || fallback);
+      return `${base}.pdf`;
     }
 
     function pad3(n) { return String(n).padStart(3, "0"); }
@@ -206,6 +262,28 @@
       });
     }
 
+    function dataUrlToBytes(dataUrl) {
+      const base64 = dataUrl.split(",")[1] || "";
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    function updateRangeValue(el, targetEl) {
+      targetEl.textContent = Number(el.value).toFixed(2);
+    }
+
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    }
+
+    updateRangeValue(compressScaleEl, compressScaleValueEl);
+    updateRangeValue(compressQualityEl, compressQualityValueEl);
+
     pdfFileEl.addEventListener("change", async () => {
       clearLog();
       const file = pdfFileEl.files?.[0];
@@ -253,6 +331,33 @@
       }
       logMerge(`${files.length} PDF(s) prêt(s) à fusionner.`, "ok");
       btnMergeEl.disabled = false;
+    });
+
+    compressFileEl.addEventListener("change", async () => {
+      clearCompressLog();
+      const file = compressFileEl.files?.[0];
+      if (!file) {
+        btnCompressEl.disabled = true;
+        return;
+      }
+      if (file.type !== "application/pdf") {
+        logCompress(`Le fichier "${file.name}" n'est pas un PDF.`, "err");
+        btnCompressEl.disabled = true;
+        return;
+      }
+      if (!compressNameEl.value.trim()) {
+        compressNameEl.value = file.name.replace(/\.pdf$/i, "");
+      }
+      logCompress(`PDF prêt pour réduction: "${file.name}".`, "ok");
+      btnCompressEl.disabled = false;
+    });
+
+    compressScaleEl.addEventListener("input", () => {
+      updateRangeValue(compressScaleEl, compressScaleValueEl);
+    });
+
+    compressQualityEl.addEventListener("input", () => {
+      updateRangeValue(compressQualityEl, compressQualityValueEl);
     });
 
     btnSplitEl.addEventListener("click", async () => {
@@ -329,14 +434,65 @@
         }
 
         const mergedBytes = await out.save();
-        const base = sanitizeBaseName(mergeNameEl.value || "documents");
-        const mergedName = `${base}_fusion.pdf`;
+        const mergedName = buildPdfName(mergeNameEl.value, "documents");
         downloadBlob(new Blob([mergedBytes], { type: "application/pdf" }), mergedName);
         logMerge(`Téléchargement lancé: ${mergedName}`, "ok");
       } catch (e) {
         logMerge(String(e?.message || e), "err");
       } finally {
         btnMergeEl.disabled = false;
+      }
+    });
+
+    btnCompressEl.addEventListener("click", async () => {
+      clearCompressLog();
+      btnCompressEl.disabled = true;
+
+      try {
+        const file = compressFileEl.files?.[0];
+        if (!file) throw new Error("Aucun PDF sélectionné.");
+        if (!window.pdfjsLib) throw new Error("pdfjs n'est pas disponible.");
+
+        const scale = parseFloat(compressScaleEl.value);
+        const quality = parseFloat(compressQualityEl.value);
+        if (!(scale > 0)) throw new Error("Échelle invalide.");
+        if (!(quality > 0 && quality <= 1)) throw new Error("Qualité JPEG invalide.");
+
+        logCompress("Chargement du PDF…", "warn");
+        const bytes = await readFileAsArrayBuffer(file);
+        const loadingTask = pdfjsLib.getDocument({ data: bytes });
+        const pdf = await loadingTask.promise;
+        const out = await PDFLib.PDFDocument.create();
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.floor(viewport.width));
+          canvas.height = Math.max(1, Math.floor(viewport.height));
+          const ctx = canvas.getContext("2d", { alpha: false });
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          const jpgBytes = dataUrlToBytes(dataUrl);
+          const jpgImage = await out.embedJpg(jpgBytes);
+          const outPage = out.addPage([jpgImage.width, jpgImage.height]);
+          outPage.drawImage(jpgImage, {
+            x: 0,
+            y: 0,
+            width: jpgImage.width,
+            height: jpgImage.height,
+          });
+          logCompress(`Page ${i}/${pdf.numPages} compressée.`, "ok");
+        }
+
+        const outBytes = await out.save();
+        const outputName = buildPdfName(compressNameEl.value, file.name.replace(/\.pdf$/i, ""));
+        downloadBlob(new Blob([outBytes], { type: "application/pdf" }), outputName);
+        logCompress(`Téléchargement lancé: ${outputName}`, "ok");
+      } catch (e) {
+        logCompress(String(e?.message || e), "err");
+      } finally {
+        btnCompressEl.disabled = false;
       }
     });
   </script>
