@@ -103,6 +103,11 @@
           <div class="hint">1 = résolution d’origine. Plus l’échelle est basse, plus le fichier sera léger (ex: <span id="compressScaleValue">1.00</span>).</div>
         </div>
         <div class="col">
+          <label>Suréchantillonnage (netteté)</label>
+          <input id="compressOversample" type="range" min="1" max="2" step="0.05" value="1.2" />
+          <div class="hint">Augmente la netteté sans trop grossir le PDF (ex: <span id="compressOversampleValue">1.20</span>).</div>
+        </div>
+        <div class="col">
           <label>Qualité JPEG</label>
           <input id="compressQuality" type="range" min="0.7" max="1" step="0.02" value="0.9" />
           <div class="hint">Impacte la clarté des pages (ex: <span id="compressQualityValue">0.90</span>).</div>
@@ -143,6 +148,8 @@
     const compressNameEl = $("compressName");
     const compressScaleEl = $("compressScale");
     const compressScaleValueEl = $("compressScaleValue");
+    const compressOversampleEl = $("compressOversample");
+    const compressOversampleValueEl = $("compressOversampleValue");
     const compressQualityEl = $("compressQuality");
     const compressQualityValueEl = $("compressQualityValue");
     const btnCompressEl = $("btnCompress");
@@ -282,6 +289,7 @@
     }
 
     updateRangeValue(compressScaleEl, compressScaleValueEl);
+    updateRangeValue(compressOversampleEl, compressOversampleValueEl);
     updateRangeValue(compressQualityEl, compressQualityValueEl);
 
     pdfFileEl.addEventListener("change", async () => {
@@ -358,6 +366,10 @@
 
     compressQualityEl.addEventListener("input", () => {
       updateRangeValue(compressQualityEl, compressQualityValueEl);
+    });
+
+    compressOversampleEl.addEventListener("input", () => {
+      updateRangeValue(compressOversampleEl, compressOversampleValueEl);
     });
 
     btnSplitEl.addEventListener("click", async () => {
@@ -454,8 +466,10 @@
         if (!window.pdfjsLib) throw new Error("pdfjs n'est pas disponible.");
 
         const scale = parseFloat(compressScaleEl.value);
+        const oversample = parseFloat(compressOversampleEl.value);
         const quality = parseFloat(compressQualityEl.value);
         if (!(scale > 0)) throw new Error("Échelle invalide.");
+        if (!(oversample >= 1)) throw new Error("Suréchantillonnage invalide.");
         if (!(quality > 0 && quality <= 1)) throw new Error("Qualité JPEG invalide.");
 
         logCompress("Chargement du PDF…", "warn");
@@ -466,13 +480,26 @@
 
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.floor(viewport.width));
-          canvas.height = Math.max(1, Math.floor(viewport.height));
-          const ctx = canvas.getContext("2d", { alpha: false });
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          const outputViewport = page.getViewport({ scale });
+          const renderViewport = page.getViewport({ scale: scale * oversample });
+          const renderCanvas = document.createElement("canvas");
+          renderCanvas.width = Math.max(1, Math.floor(renderViewport.width));
+          renderCanvas.height = Math.max(1, Math.floor(renderViewport.height));
+          const renderCtx = renderCanvas.getContext("2d", { alpha: false });
+          await page.render({ canvasContext: renderCtx, viewport: renderViewport }).promise;
+
+          let outputCanvas = renderCanvas;
+          if (oversample > 1.01) {
+            outputCanvas = document.createElement("canvas");
+            outputCanvas.width = Math.max(1, Math.floor(outputViewport.width));
+            outputCanvas.height = Math.max(1, Math.floor(outputViewport.height));
+            const outputCtx = outputCanvas.getContext("2d", { alpha: false });
+            outputCtx.imageSmoothingEnabled = true;
+            outputCtx.imageSmoothingQuality = "high";
+            outputCtx.drawImage(renderCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
+          }
+
+          const dataUrl = outputCanvas.toDataURL("image/jpeg", quality);
           const jpgBytes = dataUrlToBytes(dataUrl);
           const jpgImage = await out.embedJpg(jpgBytes);
           const outPage = out.addPage([jpgImage.width, jpgImage.height]);
