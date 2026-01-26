@@ -2,6 +2,24 @@
 body { margin: 0; background:#0b0f19; color:#e7eefc; }
 .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
 h1 { font-size: 22px; margin: 0 0 14px; }
+.page-links {
+  margin: 6px 0 14px;
+}
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(148,163,184,.12);
+  text-decoration: none;
+  color: #e7eefc;
+  font-size: 13px;
+}
+.nav-link:hover {
+  background: rgba(122,162,247,.25);
+}
 .card {
   background: rgba(255,255,255,.06);
   border: 1px solid rgba(255,255,255,.10);

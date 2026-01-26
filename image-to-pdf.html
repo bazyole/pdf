@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Images → PDF (client-side)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="page-links">
+      <a class="nav-link" href="index.html">← Retour aux outils PDF</a>
+    </div>
+
+    <h1>Outil image → PDF (png, jpg, etc.)</h1>
+
+    <div class="card">
+      <label>1) Choisir une ou plusieurs images</label>
+      <input id="imageFiles" type="file" accept="image/png,image/jpeg" multiple />
+      <div class="hint">Formats pris en charge : PNG et JPG/JPEG. L’ordre des pages suit l’ordre de sélection.</div>
+
+      <div class="row">
+        <div class="col">
+          <label>Nom du PDF de sortie</label>
+          <input id="outputName" type="text" placeholder="Ex: album-photos" />
+          <div class="hint">Le fichier final portera exactement ce nom (extension .pdf ajoutée si besoin).</div>
+        </div>
+        <div class="col">
+          <label>Sortie</label>
+          <div class="hint">Le PDF est généré côté navigateur et téléchargé automatiquement.</div>
+        </div>
+      </div>
+
+      <button id="btnConvert" disabled>Convertir & Télécharger</button>
+
+      <pre id="convertLog" aria-live="polite"></pre>
+
+      <div class="footer">
+        Lib utilisée côté navigateur : <a href="https://pdf-lib.js.org/" target="_blank" rel="noreferrer">pdf-lib</a>.
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const imageFilesEl = $("imageFiles");
+    const outputNameEl = $("outputName");
+    const btnConvertEl = $("btnConvert");
+    const convertLogEl = $("convertLog");
+
+    function log(msg, cls = "") {
+      const prefix = cls ? `[${cls.toUpperCase()}] ` : "";
+      convertLogEl.textContent += prefix + msg + "\n";
+      convertLogEl.scrollTop = convertLogEl.scrollHeight;
+    }
+
+    function clearLog() {
+      convertLogEl.textContent = "";
+    }
+
+    function sanitizeBaseName(name) {
+      const s = (name || "").trim();
+      if (!s) return "images";
+      const cleaned = s.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").slice(0, 80);
+      return cleaned.replace(/\.pdf$/i, "");
+    }
+
+    function buildPdfName(name, fallback) {
+      const base = sanitizeBaseName(name || fallback);
+      return `${base}.pdf`;
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+
+    async function readFileAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("Impossible de lire le fichier."));
+        r.onload = () => resolve(r.result);
+        r.readAsArrayBuffer(file);
+      });
+    }
+
+    function isSupportedImage(file) {
+      return file.type === "image/png" || file.type === "image/jpeg";
+    }
+
+    imageFilesEl.addEventListener("change", () => {
+      clearLog();
+      const files = Array.from(imageFilesEl.files || []);
+      if (files.length === 0) {
+        btnConvertEl.disabled = true;
+        return;
+      }
+      const invalid = files.find((file) => !isSupportedImage(file));
+      if (invalid) {
+        log(`Le fichier "${invalid.name}" n'est pas un PNG ou un JPG.`, "err");
+        btnConvertEl.disabled = true;
+        return;
+      }
+      if (!outputNameEl.value.trim()) {
+        outputNameEl.value = "images";
+      }
+      log(`${files.length} image(s) prête(s) à convertir.`, "ok");
+      btnConvertEl.disabled = false;
+    });
+
+    btnConvertEl.addEventListener("click", async () => {
+      clearLog();
+      btnConvertEl.disabled = true;
+
+      try {
+        const files = Array.from(imageFilesEl.files || []);
+        if (files.length === 0) throw new Error("Aucune image sélectionnée.");
+
+        const out = await PDFLib.PDFDocument.create();
+        for (const file of files) {
+          const bytes = await readFileAsArrayBuffer(file);
+          const image = file.type === "image/png"
+            ? await out.embedPng(bytes)
+            : await out.embedJpg(bytes);
+
+          const page = out.addPage([image.width, image.height]);
+          page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height,
+          });
+          log(`Ajoutée: ${file.name} (${Math.round(image.width)}x${Math.round(image.height)} px).`, "ok");
+        }
+
+        const outBytes = await out.save();
+        const outputName = buildPdfName(outputNameEl.value, "images");
+        downloadBlob(new Blob([outBytes], { type: "application/pdf" }), outputName);
+        log(`Téléchargement lancé: ${outputName}`, "ok");
+      } catch (e) {
+        log(String(e?.message || e), "err");
+      } finally {
+        btnConvertEl.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
